@@ -6,25 +6,15 @@ import os
 from moviepy.editor import VideoFileClip, CompositeVideoClip
 
 
-def extract(videopath, index=1):
-    video = cv2.VideoCapture()
-    if not video.open(videopath):
-        print("can not open the video")
-        exit(1)
-    while True:
-        _, frame = video.read()
-        if frame is None:
-            break
-        index += 1
-    video.release()
-    print("Totally save {:d} pics".format(index - 1))
-    a = index - 1
-    return a
+def get_n(file_video):
+    cap = cv2.VideoCapture(file_video)
+    if cap.isOpened():
+        FrameNumber = cap.get(7)
+        return int(FrameNumber)
 
 
 def copy_photo(photo_path, n):
     img = cv2.imread(photo_path, cv2.IMREAD_COLOR)
-    a_list = photo_path.split('.', 1)[0]
     path_photo = photo_path.split('.', 1)[0]
 
     try:
@@ -59,7 +49,7 @@ def become_video(fg_in_bg, name1):
     return out_video
 
 
-def add_zm(fg_in_bg_avi, zm_video_path, i, video_name, output):
+def add_zm(fg_in_bg_avi, zm_video_path, pictrue_name, video_name, output):
     clip1 = VideoFileClip(fg_in_bg_avi)
     clip3 = VideoFileClip(zm_video_path, has_mask=True)
     video = CompositeVideoClip([clip1, clip3])
@@ -68,58 +58,93 @@ def add_zm(fg_in_bg_avi, zm_video_path, i, video_name, output):
     except OSError:
         pass
     video_name = video_name.split('/', 2)[-1]
-    name = output + '/' + i + video_name + ".mp4"
+    name = output + '/' + pictrue_name + video_name + ".mp4"
     video.write_videofile(name, audio=True)  # 先不加音频
     video.close()
     return name
 
 
-def run(pictrue_path, mova, output):
-    start = time.clock()
+def run(pictrue_path, mova, output, result_list):
     pictrue_path = pictrue_path
     mova = mova
-    n = extract(mova)
-
+    n = get_n(mova)
+    # 删除掉复制的图片文件夹
     bg_list = os.listdir(pictrue_path)
+    bg_list, file_name1 = sort_file(bg_list)
+    for _ in file_name1:
+        rm_name = pictrue_path + "/" + _
+        try:
+            shutil.rmtree(rm_name)
+        except OSError:
+            pass
 
     for _ in bg_list:
         for_mat = _.split('.', 1)[-1]
         pictrue_name = _.split('.', 1)[0]
         video_name = mova.split('.', 1)[0]
 
-        name1 = pictrue_path + '/' + _
-        if for_mat == 'png' or for_mat == 'jpg':
-            path_photo = copy_photo(name1, n)
+        # 判断接下来要处理的视频是不是已经处理完毕了
+        v = video_name.split('/', 2)[-1]
+        re = pictrue_name + v + ".mp4"
+        if re not in result_list:
 
-            video = become_video(path_photo, mova)
+            name1 = pictrue_path + '/' + _
+            if for_mat == 'png' or for_mat == 'jpg':
+                path_photo = copy_photo(name1, n)
 
-            name = add_zm(mova.split('.', 1)[0] + 'out.avi', mova, pictrue_name, video_name, output)
+                video = become_video(path_photo, mova)
 
-            shutil.rmtree(path_photo)
-            os.remove(mova.split('.', 1)[0] + 'out.avi')  # 中间产物
-            print("处理完成" + name)
-        else:
-            # 如果背景里面有视频
-            pass
+                name = add_zm(fg_in_bg_avi=video, zm_video_path=mova,
+                              pictrue_name=pictrue_name, video_name=video_name, output=output)
 
-    end = time.clock()
-
-    print('总共耗时: %s 分钟' % ((end - start) % 60))
+                shutil.rmtree(path_photo)
+                os.remove(video)  # 中间产物
+                print("处理完成" + name)
+            else:
+                # 如果背景里面有视频
+                pass
 
 
 def sort_list(unlist):
     mov_list = []
     file_list = []
+    avi_list = []
+
     for _ in unlist:
         if ".mov" in _:
             mov_list.append(_)
+        elif '.avi' in _:
+            avi_list.append(_)
         else:
             file_list.append(_)
     sorted_list = file_list + mov_list
-    return sorted_list
+    return sorted_list, avi_list
+
+
+def sort_file(unlist):
+    jpg_file = []
+    file_list = []
+    for _ in unlist:
+        if "." in _:
+            jpg_file.append(_)
+        else:
+            file_list.append(_)
+    return jpg_file, file_list
 
 
 if __name__ == '__main__':
+
+    start = time.clock()
+
+    timeout = time.strftime('%Y-%m-%d', time.localtime(time.time()))
+    output = timeout + "output"
+
+    # 是否有没有生成视频
+    try:
+        result_list = os.listdir(output)
+    except OSError:
+        result_list = []
+        pass
 
     for parent, dirnames, filename in os.walk("data"):
 
@@ -128,16 +153,22 @@ if __name__ == '__main__':
             dirname_path = "data/" + dirname
             file_name = os.listdir(dirname_path)
 
-            # todo 将乱序的列表分成两个列表
-            file_name = sort_list(file_name)
+            # 将乱序的列表分成两个列表,并删除avi中间文件
+            file_name, avi_name = sort_list(file_name)
+            for _ in avi_name:
+                rm_avi = dirname_path + "/" + _
+                try:
+                    os.remove(rm_avi)
+                except OSError:
+                    pass
 
-            timeout = time.strftime('%Y-%m-%d', time.localtime(time.time()))
-            output = timeout + "output"
             pictrue_path = dirname_path + "/" + file_name[0]
 
             for j in range(len(file_name) - 1):
                 # print(j)
                 mova = dirname_path + "/" + file_name[j + 1]
-                run(pictrue_path=pictrue_path, mova=mova, output=output)
+                run(pictrue_path=pictrue_path, mova=mova, output=output, result_list=result_list)
         break
     print("全部完成")
+    end = time.clock()
+    print('总共耗时: %s 分钟' % ((end - start) / 60))
